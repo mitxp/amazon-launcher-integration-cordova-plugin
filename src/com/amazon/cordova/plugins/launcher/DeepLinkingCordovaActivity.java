@@ -18,10 +18,7 @@ import com.amazon.cordova.plugins.launcher.LauncherIntegrationUtils;
 public class DeepLinkingCordovaActivity extends CordovaActivity {
     static final String QUERY_PARAMETER_NAME = "amazonLauncherIntegrationContentId";
     static final String TAG = "DeepLinkingCordovaActivity";
-    static final String WHITELISTED_VIDEO_ID_CHARACTERS = "a-zA-Z0-9\\-_:";
-    static final String WHITELISTED_VIDEO_ID_REGEX = "^([" + WHITELISTED_VIDEO_ID_CHARACTERS + "]+)$";
     static final String DEEP_LINK_REGEX_METADATA_KEY = "com.amazon.cordova.plugins.launcher.DEEP_LINK_REGEX";
-
 
     /**
      * Overrides the launchUrl member with a deep link url specifying content to be launched.
@@ -32,7 +29,7 @@ public class DeepLinkingCordovaActivity extends CordovaActivity {
         super.onCreate(savedInstanceState);
         if (this.appView == null || isBlank(this.appView.getUrl())) {
             // determine if the application was launched from a different application (such as the launcher app) and contains additional data needing to be passed to the web page
-            this.launchUrl = createDeepLinkUrl();
+            this.launchUrl = createDeepLinkUrl(getIntent());
             Log.d(TAG, "Loading webview with url : " + launchUrl);
         } else {
             Log.d(TAG, "Webview is already loaded with url : " + this.appView.getUrl());
@@ -43,7 +40,7 @@ public class DeepLinkingCordovaActivity extends CordovaActivity {
      * Creates a launchUrl with a specific parameter to enable app to directly launch video, if the launch intent includes launch data.
      * @return The full deep link url string to be launched by webview.
      */
-    private String createDeepLinkUrl() {
+    private String createDeepLinkUrl(Intent intent) {
         boolean dataIsInURIFormat = false;
         try {
             dataIsInURIFormat = LauncherIntegrationUtils.isVideoIdInIntentData(this);
@@ -54,12 +51,12 @@ public class DeepLinkingCordovaActivity extends CordovaActivity {
 
         String launchIntentData;
         if (dataIsInURIFormat) {
-            Uri dataUri = getIntent().getData();
+            Uri dataUri = intent.getData();
             launchIntentData = dataUri == null ? null : dataUri.toString();
         } else {
-            launchIntentData = getIntent().getStringExtra(LauncherIntegrationUtils.getVideoIdDataExtraName());
+            launchIntentData = intent.getStringExtra(LauncherIntegrationUtils.getVideoIdDataExtraName());
         }
-        if (isBlank(launchIntentData) || !getIntent().getAction().equals(Intent.ACTION_VIEW)) {
+        if (isBlank(launchIntentData) || !Intent.ACTION_VIEW.equals(intent.getAction())) {
             return this.launchUrl;
         }
 
@@ -68,10 +65,6 @@ public class DeepLinkingCordovaActivity extends CordovaActivity {
             videoID = extractId(launchIntentData);
         } catch (Exception e) {
             Log.e(TAG, "Error creating deep link URL", e);
-            return this.launchUrl;
-        }
-        if (!containsOnlyWhitelistedCharacters(videoID)) {
-            Log.w(TAG, "VideoID did not pass the accepted character whitelist");
             return this.launchUrl;
         }
         return addVideoIDQueryParam(this.launchUrl, videoID);
@@ -114,21 +107,6 @@ public class DeepLinkingCordovaActivity extends CordovaActivity {
     }
 
     /**
-     * Returns true if stringToValidate contains only whitelisted characters
-     * @param stringToValidate string to be compared against whitelisted characters
-     * @return boolean: true if stringToValidate passes whitelist, false if it contains non-whitelisted characters
-     */
-    private boolean containsOnlyWhitelistedCharacters(String stringToValidate) {
-        if (isBlank(stringToValidate)) {
-            return false;
-        }
-        Pattern pattern = Pattern.compile(WHITELISTED_VIDEO_ID_REGEX);
-        Matcher matcher = pattern.matcher(stringToValidate);
-
-        return matcher.find();
-    }
-
-    /**
      * Checks if string is not null, and contains more than just whitespace
      * @param string string to be checked is not null or empty
      * @return boolean: true if string is null or empty, false if it contains characters
@@ -138,5 +116,41 @@ public class DeepLinkingCordovaActivity extends CordovaActivity {
             return true;
         }
         return TextUtils.isEmpty(string.trim());
+    }
+
+    /**
+     * Handles intents that are received when the app is already running. Checks if query string with the deeplink would change,
+     * if so the updated url will be loaded in the webview. This will reload the web app.
+     * @param intent Intent with deeplink data.
+     */
+    @Override
+    public void onNewIntent(Intent intent) {
+      super.onNewIntent(intent);
+
+      String originalUrl = this.launchUrl;
+      this.launchUrl = this.dropQueryParam(this.launchUrl);
+      String launchUrl = createDeepLinkUrl(intent);
+
+      if (this.launchUrl==launchUrl) {
+        Log.i(TAG, "onNewIntent: url didn't change - "+launchUrl);
+        this.launchUrl = originalUrl;
+        return;
+      }
+      Log.i(TAG, "inNewIntent: Loading new url : " + launchUrl);
+      this.launchUrl = launchUrl;
+      loadUrl(launchUrl);
+    }
+
+    private String dropQueryParam(String originalUri) {
+      Uri uri = Uri.parse(originalUri);
+      Uri.Builder builder = uri.buildUpon().clearQuery();
+      for (String name : uri.getQueryParameterNames()) {
+          if (!name.equals(QUERY_PARAMETER_NAME)) {
+              for (String value : uri.getQueryParameters(name)) {
+                  builder.appendQueryParameter(name, value);
+              }
+          }
+      }
+      return builder.build().toString();
     }
 }

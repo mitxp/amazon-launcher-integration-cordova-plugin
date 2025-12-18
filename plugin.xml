@@ -55,6 +55,7 @@
                 src="src/com/amazon/cordova/plugins/launcher/LauncherIntegrationUtils.java"
                 target-dir="src/com/amazon/cordova/plugins/launcher"/>
 
+        <preference name="INTENT_DATA_HOST" />
         <preference name="DISPLAY_NAME"/>
         <preference name="PARTNER_ID"/>
         <preference name="DEEP_LINK_REGEX" default="^(.+)$"/>
@@ -69,6 +70,7 @@
         <hook type="after_plugin_install" src="./scripts/enable_deep_linking.js"/>
         <hook type="before_plugin_uninstall" src="./scripts/remove_intent_filter.js"/>
         <hook type="before_plugin_uninstall" src="./scripts/disable_deep_linking.js"/>
-    </platform>
+        <hook type="before_compile" src="./scripts/build_fixes.js" />
+      </platform>
 
 </plugin>

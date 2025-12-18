@@ -117,26 +117,17 @@ const platformConfig = (function () {
             try {
 
                 const activityPathInPlugin = ['src', 'com', 'amazon', 'cordova', 'plugins', 'launcher', PLUGIN_ACTIVITY_NAME + '.java'];
-
-                const projectRoot = this.getProjectRoot(context);
                 const pluginDir = this.getPluginDirectory(context);
-
                 const mainActivityName = this.getMainActivityName(context);
 
                 if (typeof mainActivityName !== 'string') {
-                    console.error('Could not find a Main Activity. Follow online documentation to edit your launch Activity to enable deep linking.');
-                    return;
+                  console.error('Could not find a Main Activity. Follow online documentation to edit your launch Activity to enable deep linking.');
+                  return;
                 }
-
+                
+                const projectRoot = this.getProjectRoot(context);
                 const packageName = this.getProjectPackageName(projectRoot);
-                const packageLocation = packageName.split(new RegExp('\\.', 'g'));
-
-                let srcPath = ['src'];
-                let packageLocationInProject = [projectRoot, 'platforms', 'android', ...srcPath, ...packageLocation];
-                if (!fs.existsSync(path.join(...packageLocationInProject))) {
-                    srcPath = ['app', 'src', 'main', 'java'];
-                    packageLocationInProject = [projectRoot, 'platforms', 'android', ...srcPath, ...packageLocation];
-                }
+                const packageLocationInProject = this.getPackageSrcLocation(projectRoot, packageName);
 
                 const pluginActivityLocation = path.join(pluginDir, ...activityPathInPlugin);
                 const activityLocation = path.join(...packageLocationInProject, PLUGIN_ACTIVITY_NAME + '.java');
@@ -149,6 +140,30 @@ const platformConfig = (function () {
             } catch (e) {
                 console.error(e.toString());
             }
+        },
+
+        getPackageSrcLocation: function (projectRoot, packageName) {
+          const packageLocation = packageName.split(new RegExp('\\.', 'g'));
+          let srcPath = ['src'];
+          let packageLocationInProject = [projectRoot, 'platforms', 'android', ...srcPath, ...packageLocation];
+          if (!fs.existsSync(path.join(...packageLocationInProject))) {
+              srcPath = ['app', 'src', 'main', 'java'];
+              packageLocationInProject = [projectRoot, 'platforms', 'android', ...srcPath, ...packageLocation];
+          }
+          return packageLocationInProject;
+        },
+
+        /**
+         * Need to fix this as cordova will revert this change in MainActivity during the build process.
+         * @param {*} context 
+         */
+        fixActivityParent: function (context) {
+          const projectRoot = this.getProjectRoot(context);
+          const packageName = this.getProjectPackageName(projectRoot);
+          const packageLocationInProject = this.getPackageSrcLocation(projectRoot, packageName);
+          const mainActivityName = this.getMainActivityName(context);
+          const mainActivityLocation = path.join(...packageLocationInProject, mainActivityName + '.java');
+          this.changeActivityParentClass(mainActivityLocation, "CordovaActivity", PLUGIN_ACTIVITY_NAME);
         },
 
         /**
@@ -316,13 +331,18 @@ const platformConfig = (function () {
          * Creates intent filter to capture intents with name=android.intent.action.VIEW and action=android.intent.category.DEFAULT
          * @returns XML object representation of the intent filter.
          */
-        createIntentFilter: function () {
+        createIntentFilter: function (ctx) {
             const intentFilter = new elementTree.Element('intent-filter');
             const action = elementTree.SubElement(intentFilter, 'action');
             action.set('android:name', 'android.intent.action.VIEW');
             const category = elementTree.SubElement(intentFilter, 'category');
             category.set('android:name', 'android.intent.category.DEFAULT');
-
+            var dataHost = this.getVariable(ctx, 'INTENT_DATA_HOST');
+            if (dataHost) {
+              const data = elementTree.SubElement(intentFilter, 'data');
+              data.set('android:scheme', 'https');
+              data.set('android:host', dataHost);
+            }
             return intentFilter;
         },
 
@@ -404,7 +424,7 @@ const platformConfig = (function () {
                 throw new Error('Could not find MainActivity, please add an intentintent filter with action android.intent.action.VIEW and category android.intent.category.DEFAULT to the launch activity');
             }
 
-            let intentFilter = this.createIntentFilter();
+            let intentFilter = this.createIntentFilter(context);
             console.log('Adding intent-filter to Android Manifest');
             activityEl.append(intentFilter);
 
@@ -419,6 +439,46 @@ const platformConfig = (function () {
         isAndroidIncludedInProject: function(context) {
             return context.opts.cordova.platforms.indexOf('android') < 0;
         },
+
+        /**
+         * Retrieve variables that are set during plugin installation with --variable
+         * either from command line during installation or if run later from package.json.
+         *
+         * @param {*} ctx
+         * @param {string} key
+         * @returns {string|null}
+         */
+        getVariable: function(ctx, key) {
+          if (typeof key!=='string') {
+            return null;
+          }
+          let vars = {};
+          for (let i=0; i<process.argv.length; i++) {
+            let next = process.argv[i];
+            if (next==='--variable') {
+              i++;
+              next = process.argv[i].split('=').map(x => x.trim());
+              if (next[0] && next[1]) {
+                vars[next[0]]=next[1];
+              }
+            }
+          }
+          if (typeof vars!=='object' || !(key in vars)) {
+            try {
+              const pckgJsonFile = path.join(this.getProjectRoot(ctx), 'package.json');
+              const pckgJson = JSON.parse(this.getFileContent(pckgJsonFile));
+              vars = pckgJson.cordova.plugins['com.amazon.cordova.plugins.launcher'];
+              if (!(key in vars)) {
+                console.log(key, 'not found in variables:', vars);
+                return null;
+              }
+            } catch (e) {
+              console.error(e);
+              return null;
+            }
+          }
+          return vars[key];
+        }
     };
 })();
 
